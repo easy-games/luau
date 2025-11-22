@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <string.h>
 
+LUAU_FASTFLAGVARIABLE(LuauCompileUnusedUdataFix)
+
 namespace Luau
 {
 
@@ -697,7 +699,7 @@ void BytecodeBuilder::finalize()
         // Write the mapping between used type name indices and their name
         for (uint32_t i = 0; i < uint32_t(userdataTypes.size()); i++)
         {
-            if (userdataTypes[i].used)
+            if (!FFlag::LuauCompileUnusedUdataFix || userdataTypes[i].used)
             {
                 writeByte(bytecode, i + 1);
                 writeVarInt(bytecode, userdataTypes[i].nameRef);
