@@ -108,7 +108,6 @@ struct OverloadResolution
      * documentation.
      */
     SelectedOverload getUnambiguousOverload() const;
-
 };
 
 struct OverloadResolver
@@ -177,13 +176,7 @@ private:
         NotNull<DenseHashSet<TypeId>> uniqueTypes
     );
 
-    void testFunction(
-        OverloadResolution& result,
-        TypeId fnTy,
-        TypePackId argsPack,
-        Location fnLocation,
-        NotNull<DenseHashSet<TypeId>> uniqueTypes
-    );
+    void testFunction(OverloadResolution& result, TypeId fnTy, TypePackId argsPack, Location fnLocation, NotNull<DenseHashSet<TypeId>> uniqueTypes);
 
     void testFunctionOrCallMetamethod(
         OverloadResolution& result,
@@ -194,22 +187,12 @@ private:
     );
 
 public:
-    // We want to clip this with LuauNewOverloadResolver2, but there are other
-    // call sites such as `solveFunctionCall`.
+    // Clip this with LuauBuiltinTypeFunctionsUseNewOverloadResolution
     std::pair<Analysis, TypeId> selectOverload_DEPRECATED(
         TypeId ty,
         TypePackId args,
         NotNull<DenseHashSet<TypeId>> uniqueTypes,
         bool useFreeTypeBounds
-    );
-
-    // Clip with LuauNewOverloadResolver2
-    void resolve_DEPRECATED(
-        TypeId fnTy,
-        const TypePack* args,
-        AstExpr* selfExpr,
-        const std::vector<AstExpr*>* argExprs,
-        NotNull<DenseHashSet<TypeId>> uniqueTypes
     );
 
 private:
@@ -221,7 +204,6 @@ private:
         NotNull<DenseHashSet<TypeId>> uniqueTypes,
         bool callMetamethodOk = true
     );
-    static bool isLiteral(AstExpr* expr);
     LUAU_NOINLINE
     std::pair<Analysis, ErrorVec> checkOverload_(
         TypeId fnTy,
@@ -302,7 +284,8 @@ struct SolveResult
 // Helper utility, presently used for binary operator type functions.
 //
 // Given a function and a set of arguments, select a suitable overload.
-SolveResult solveFunctionCall(
+// Clip with FFlag::LuauBuiltinTypeFunctionsUseNewOverloadResolution
+SolveResult solveFunctionCall_DEPRECATED(
     NotNull<TypeArena> arena,
     NotNull<BuiltinTypes> builtinTypes,
     NotNull<Normalizer> normalizer,

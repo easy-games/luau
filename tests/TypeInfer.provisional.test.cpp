@@ -17,9 +17,7 @@ LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTINT(LuauTypeInferIterationLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTINT(LuauTypeInferTypePackLoopLimit)
-LUAU_FASTFLAG(LuauNoMoreComparisonTypeFunctions)
-LUAU_FASTFLAG(LuauAddRefinementToAssertions)
-LUAU_FASTFLAG(LuauNewOverloadResolver2)
+LUAU_FASTFLAG(LuauBetterTypeMismatchErrors)
 
 TEST_SUITE_BEGIN("ProvisionalTests");
 
@@ -214,7 +212,10 @@ TEST_CASE_FIXTURE(Fixture, "while_body_are_also_refined")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
-    CHECK_EQ("Type 'Node<T>?' could not be converted into 'Node<T>'", toString(result.errors[0]));
+    if (FFlag::LuauBetterTypeMismatchErrors)
+        CHECK_EQ("Expected this to be 'Node<T>', but got 'Node<T>?'", toString(result.errors[0]));
+    else
+        CHECK_EQ("Type 'Node<T>?' could not be converted into 'Node<T>'", toString(result.errors[0]));
 }
 
 // Originally from TypeInfer.test.cpp.
@@ -570,8 +571,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "for_in_loop_with_zero_iterators")
 // Ideally, we would not try to export a function type with generic types from incorrect scope
 TEST_CASE_FIXTURE(BuiltinsFixture, "generic_type_leak_to_module_interface")
 {
-    ScopedFastFlag sff{FFlag::LuauNewOverloadResolver2, true};
-
     fileResolver.source["game/A"] = R"(
 local wrapStrictTable
 
@@ -616,8 +615,6 @@ return wrapStrictTable(Constants, "Constants")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "generic_type_leak_to_module_interface_variadic")
 {
-    ScopedFastFlag sff{FFlag::LuauNewOverloadResolver2, true};
-
     fileResolver.source["game/A"] = R"(
 local wrapStrictTable
 
@@ -842,6 +839,19 @@ TEST_CASE_FIXTURE(Fixture, "assign_table_with_refined_property_with_a_similar_ty
 
     if (FFlag::LuauSolverV2)
         LUAU_REQUIRE_NO_ERRORS(result); // This is wrong.  We should be rejecting this assignment.
+    else if (FFlag::LuauBetterTypeMismatchErrors)
+    {
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+        const std::string expected =
+            R"(Expected this to be exactly
+	'{ x: number }'
+but got
+	'{ x: number? }'
+caused by:
+  Property 'x' is not compatible.
+Expected this to be exactly 'number', but got 'number?')";
+        CHECK_EQ(expected, toString(result.errors[0]));
+    }
     else
     {
         LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -1295,8 +1305,6 @@ TEST_CASE_FIXTURE(Fixture, "table_containing_non_final_type_is_erroneously_cache
 // CLI-111113
 TEST_CASE_FIXTURE(Fixture, "we_cannot_infer_functions_that_return_inconsistently")
 {
-    ScopedFastFlag sff{FFlag::LuauNoMoreComparisonTypeFunctions, true};
-
     CheckResult result = check(R"(
         function find_first<T>(tbl: {T}, el)
             for i, e in tbl do
@@ -1397,7 +1405,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "function_indexer_satisfies_reading_property"
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     auto err = get<TypeMismatch>(result.errors[0]);
     REQUIRE(err);
-    CHECK_EQ("{ @metatable { __index: (unknown, string) -> number }, {  } }", toString(err->givenType, { /* exhaustive */ true}));
+    CHECK_EQ("{ @metatable { __index: (unknown, string) -> number }, {  } }", toString(err->givenType, {/* exhaustive */ true}));
     CHECK_EQ("{ read X: number }", toString(err->wantedType));
 }
 
@@ -1423,10 +1431,7 @@ TEST_CASE_FIXTURE(Fixture, "unification_inferring_never_for_refined_param")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "assert_and_many_nested_typeof_contexts")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::LuauSolverV2, true},
-        {FFlag::LuauAddRefinementToAssertions, true},
-    };
+    ScopedFastFlag sff{FFlag::LuauSolverV2, true};
 
     CheckResult result = check(R"(
         local foo: unknown = nil :: any
@@ -1469,7 +1474,6 @@ TEST_CASE_FIXTURE(Fixture, "indexing_union_of_indexers")
             return t[true]
         end
     )"));
-
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "unions_should_work_with_bidirectional_typechecking")
@@ -1498,7 +1502,5 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "unions_should_work_with_bidirectional_typech
     CHECK(get<TypeMismatch>(result.errors[0]));
     CHECK(get<TypeMismatch>(result.errors[1]));
 }
-
-
 
 TEST_SUITE_END();

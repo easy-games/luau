@@ -277,7 +277,7 @@ struct NormalizedType
     /// Returns true if this type should result in error suppressing behavior.
     bool shouldSuppressErrors() const;
 
-    /// Returns true if this type contains the primitve top table type, `table`.
+    /// Returns true if this type contains the primitive top table type, `table`.
     bool hasTopTable() const;
 
     /// Returns true if this type is `nil` or `nil | *error-type*`
@@ -355,10 +355,9 @@ public:
 
     std::optional<TypePackId> intersectionOfTypePacks(TypePackId here, TypePackId there);
 
-    // Move to private with LuauNormalizerStepwiseFuel
+private:
     std::optional<TypePackId> intersectionOfTypePacks_INTERNAL(TypePackId here, TypePackId there);
 
-private:
     // ------- Cached TypeIds
     TypeId unionType(TypeId here, TypeId there);
     TypeId intersectionType(TypeId here, TypeId there);

@@ -9,8 +9,9 @@
 #include "Luau/Subtyping.h"
 #include "Luau/Type.h"
 #include "Luau/TypeFwd.h"
-#include "Luau/TypeOrPack.h"
 #include "Luau/TypeUtils.h"
+
+LUAU_FASTFLAG(LuauBetterTypeMismatchErrors)
 
 namespace Luau
 {
@@ -44,7 +45,7 @@ struct Reasonings
         // sort the reasons here to achieve a stable error
         // stringification.
         std::sort(reasons.begin(), reasons.end());
-        std::string allReasons = "\nthis is because ";
+        std::string allReasons = (FFlag::LuauBetterTypeMismatchErrors && reasons.size() < 2) ? "\n" : "\nthis is because ";
         for (const std::string& reason : reasons)
         {
             if (reasons.size() > 1)
@@ -102,6 +103,9 @@ struct TypeChecker2
     void reportError(TypeErrorData data, const Location& location);
     Reasonings explainReasonings(TypeId subTy, TypeId superTy, Location location, const SubtypingResult& r);
     Reasonings explainReasonings(TypePackId subTp, TypePackId superTp, Location location, const SubtypingResult& r);
+
+    bool testIsSubtype(TypeId subTy, TypeId superTy, Location location);
+    bool testIsSubtype(TypePackId subTy, TypePackId superTy, Location location);
 
 private:
     static bool allowsNoReturnValues(const TypePackId tp);
@@ -194,9 +198,6 @@ private:
     bool testLiteralOrAstTypeIsSubtype(AstExpr* expr, TypeId expectedType);
 
     bool testPotentialLiteralIsSubtype(AstExpr* expr, TypeId expectedType);
-
-    bool testIsSubtype(TypeId subTy, TypeId superTy, Location location);
-    bool testIsSubtype(TypePackId subTy, TypePackId superTy, Location location);
 
     void maybeReportSubtypingError(TypeId subTy, TypeId superTy, const Location& location);
     // Tests whether subTy is a subtype of superTy in the context of a function iterator for a for-in statement.

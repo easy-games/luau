@@ -35,17 +35,17 @@ void luaC_validate(lua_State* L);
 void luau_callhook(lua_State* L, lua_Hook hook, void* userdata);
 
 LUAU_FASTFLAG(DebugLuauAbortingChecks)
-LUAU_FASTFLAG(LuauExplicitTypeExpressionInstantiation)
+LUAU_FASTFLAG(LuauExplicitTypeInstantiationSyntax)
 LUAU_FASTINT(CodegenHeuristicsInstructionLimit)
-LUAU_FASTFLAG(LuauVectorLerp)
-LUAU_FASTFLAG(LuauCompileVectorLerp)
-LUAU_FASTFLAG(LuauTypeCheckerVectorLerp2)
-LUAU_FASTFLAG(LuauCodeGenVectorLerp2)
 LUAU_FASTFLAG(LuauStacklessPcall)
 LUAU_FASTFLAG(LuauMathIsNanInfFinite)
 LUAU_FASTFLAG(LuauCompileMathIsNanInfFinite)
 LUAU_FASTFLAG(LuauTypeCheckerMathIsNanInfFinite)
 LUAU_FASTFLAG(LuauCodegenChainedSpills)
+LUAU_FASTFLAG(LuauCodegenSpillRestoreFreeTemp)
+LUAU_FASTFLAG(LuauCodegenExtraSimd)
+LUAU_FASTFLAG(LuauCodegenDwordSpillSlots)
+LUAU_FASTFLAG(LuauCodegenExtraSpills)
 
 static lua_CompileOptions defaultOptions()
 {
@@ -554,6 +554,74 @@ static int lua_vec2_namecall(lua_State* L)
     luaL_error(L, "%s is not a valid method of vector", luaL_checkstring(L, 1));
 }
 
+Vertex* lua_vertex_push(lua_State* L)
+{
+    Vertex* data = (Vertex*)lua_newuserdatatagged(L, sizeof(Vertex), kTagVertex);
+
+    lua_getuserdatametatable(L, kTagVertex);
+    lua_setmetatable(L, -2);
+
+    return data;
+}
+
+Vertex* lua_vertex_get(lua_State* L, int idx)
+{
+    Vertex* a = (Vertex*)lua_touserdatatagged(L, idx, kTagVertex);
+
+    if (a)
+        return a;
+
+    luaL_typeerror(L, idx, "vertex");
+}
+
+static int lua_vertex(lua_State* L)
+{
+    const float* pos = luaL_checkvector(L, 1);
+    const float* normal = luaL_checkvector(L, 2);
+    Vec2* uv = lua_vec2_get(L, 3);
+
+    Vertex* data = lua_vertex_push(L);
+
+    data->pos[0] = pos[0];
+    data->pos[1] = pos[1];
+    data->pos[2] = pos[2];
+    data->normal[0] = normal[0];
+    data->normal[1] = normal[1];
+    data->normal[2] = normal[2];
+    data->uv[0] = uv->x;
+    data->uv[1] = uv->y;
+
+    return 1;
+}
+
+static int lua_vertex_index(lua_State* L)
+{
+    Vertex* v = lua_vertex_get(L, 1);
+    const char* name = luaL_checkstring(L, 2);
+
+    if (strcmp(name, "pos") == 0)
+    {
+        lua_pushvector(L, v->pos[0], v->pos[1], v->pos[2]);
+        return 1;
+    }
+
+    if (strcmp(name, "normal") == 0)
+    {
+        lua_pushvector(L, v->normal[0], v->normal[1], v->normal[2]);
+        return 1;
+    }
+
+    if (strcmp(name, "uv") == 0)
+    {
+        Vec2* uv = lua_vec2_push(L);
+        uv->x = v->uv[0];
+        uv->y = v->uv[1];
+        return 1;
+    }
+
+    luaL_error(L, "%s is not a valid member of vertex", name);
+}
+
 void setupUserdataHelpers(lua_State* L)
 {
     // create metatable with all the metamethods
@@ -666,6 +734,22 @@ void setupUserdataHelpers(lua_State* L)
     // ctor
     lua_pushcfunction(L, lua_vec2, "vec2");
     lua_setglobal(L, "vec2");
+
+    lua_pop(L, 1);
+
+    // register vertex as well
+    luaL_newmetatable(L, "vertex");
+    lua_pushvalue(L, -1);
+    lua_setuserdatametatable(L, kTagVertex);
+
+    lua_pushcfunction(L, lua_vertex_index, nullptr);
+    lua_setfield(L, -2, "__index");
+
+    lua_setreadonly(L, -1, true);
+
+    // ctor
+    lua_pushcfunction(L, lua_vertex, "vertex");
+    lua_setglobal(L, "vertex");
 
     lua_pop(L, 1);
 }
@@ -966,7 +1050,7 @@ TEST_CASE("Pack")
 
 TEST_CASE("ExplicitTypeInstantiations")
 {
-    ScopedFastFlag sff{FFlag::LuauExplicitTypeExpressionInstantiation, true};
+    ScopedFastFlag sff{FFlag::LuauExplicitTypeInstantiationSyntax, true};
     runConformance("explicit_type_instantiations.luau");
 }
 
@@ -1256,12 +1340,9 @@ TEST_CASE("Vector")
 
 TEST_CASE("VectorLibrary")
 {
-    ScopedFastFlag _[]{
-        {FFlag::LuauCompileVectorLerp, true},
-        {FFlag::LuauTypeCheckerVectorLerp2, true},
-        {FFlag::LuauVectorLerp, true},
-        {FFlag::LuauCodeGenVectorLerp2, true}
-    };
+    ScopedFastFlag luauCodegenExtraSimd{FFlag::LuauCodegenExtraSimd, true};
+    ScopedFastFlag luauCodegenSplitFloat{FFlag::LuauCodegenSplitFloat, true};
+    ScopedFastFlag luauCodegenFloatOps{FFlag::LuauCodegenFloatOps, true};
 
     lua_CompileOptions copts = defaultOptions();
 
@@ -1968,8 +2049,25 @@ TEST_CASE("ApiIter")
     }
     CHECK(sum2 == 580);
 
-    // pop table
-    lua_pop(L, 1);
+    // check lua_rawiter compatibility with C stack limit
+    lua_settop(L, 18);
+    lua_pushvalue(L, 1);
+
+    CHECK(lua_gettop(L) == 19);
+    CHECK(lua_checkstack(L, 2));
+
+    // Luau iteration interface: lua_rawiter (faster and preferable to lua_next)
+    double sum3 = 0;
+    for (int index = 0; index = lua_rawiter(L, -1, index), index >= 0;)
+    {
+        sum3 += lua_tonumber(L, -2); // key
+        sum3 += lua_tonumber(L, -1); // value
+        lua_pop(L, 2);               // pop both key and value
+    }
+    CHECK(sum3 == 580);
+
+    // pop everything
+    lua_pop(L, 19);
 }
 
 static int cpcallTest(lua_State* L)
@@ -2857,16 +2955,17 @@ TEST_CASE("Interrupt")
         }
     };
 
-    for (int test = 1; test <= 5; ++test)
+    for (int test = 1; test <= 6; ++test)
     {
         lua_State* T = lua_newthread(L);
 
-        std::string name = "strhang" + std::to_string(test);
+        std::string name = "hang" + std::to_string(test);
         lua_getglobal(T, name.c_str());
 
         index = 0;
         int status = lua_resume(T, nullptr, 0);
         CHECK(status == LUA_ERRRUN);
+        CHECK(strstr(luaL_checkstring(T, -1), "timeout") != nullptr);
 
         lua_pop(L, 1);
     }
@@ -2874,7 +2973,7 @@ TEST_CASE("Interrupt")
     {
         lua_State* T = lua_newthread(L);
 
-        lua_getglobal(T, "strhangpcall");
+        lua_getglobal(T, "hangpcall");
 
         index = 0;
         int status = lua_resume(T, nullptr, 0);
@@ -3364,6 +3463,11 @@ TEST_CASE("SafeEnv")
 
 TEST_CASE("Native")
 {
+    ScopedFastFlag luauCodegenSpillRestoreFreeTemp{FFlag::LuauCodegenSpillRestoreFreeTemp, true};
+    ScopedFastFlag luauCodegenChainedSpills{FFlag::LuauCodegenChainedSpills, true};
+    ScopedFastFlag luauCodegenDwordSpillSlots{FFlag::LuauCodegenDwordSpillSlots, true};
+    ScopedFastFlag luauCodegenExtraSpills{FFlag::LuauCodegenExtraSpills, true};
+
     // This tests requires code to run natively, otherwise all 'is_native' checks will fail
     if (!codegen || !luau_codegen_supported())
         return;
@@ -3421,6 +3525,7 @@ TEST_CASE("Native")
 TEST_CASE("NativeIntegerSpills")
 {
     ScopedFastFlag luauCodegenChainedSpills{FFlag::LuauCodegenChainedSpills, true};
+    ScopedFastFlag luauCodegenDwordSpillSlots{FFlag::LuauCodegenDwordSpillSlots, true};
 
     lua_CompileOptions copts = defaultOptions();
 
@@ -3461,7 +3566,7 @@ TEST_CASE("NativeUserdata")
     lua_CompileOptions copts = defaultOptions();
     Luau::CodeGen::CompilationOptions nativeOpts = defaultCodegenOptions();
 
-    static const char* kUserdataCompileTypes[] = {"vec2", "color", "mat3", nullptr};
+    static const char* kUserdataCompileTypes[] = {"vec2", "color", "mat3", "vertex", nullptr};
     copts.userdataTypes = kUserdataCompileTypes;
 
     SUBCASE("NoIrHooks")

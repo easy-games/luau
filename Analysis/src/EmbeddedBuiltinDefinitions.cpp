@@ -1,10 +1,9 @@
 // This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 #include "Luau/BuiltinDefinitions.h"
 
-LUAU_FASTFLAGVARIABLE(LuauTypeCheckerVectorLerp2)
 LUAU_FASTFLAGVARIABLE(LuauTypeCheckerMathIsNanInfFinite)
 LUAU_FASTFLAGVARIABLE(LuauUseTopTableForTableClearAndIsFrozen)
-
+LUAU_FASTFLAGVARIABLE(LuauTypeCheckerUdtfRenameClassToExtern)
 LUAU_FASTFLAGVARIABLE(LuauMorePermissiveNewtableType)
 
 namespace Luau
@@ -376,36 +375,6 @@ declare vector: {
 
 )BUILTIN_SRC";
 
-static const char* const kBuiltinDefinitionVectorSrc_DEPRECATED = R"BUILTIN_SRC(
-
--- While vector would have been better represented as a built-in primitive type, type solver extern type handling covers most of the properties
-declare extern type vector with
-    x: number
-    y: number
-    z: number
-end
-
-declare vector: {
-    create: @checked (x: number, y: number, z: number?) -> vector,
-    magnitude: @checked (vec: vector) -> number,
-    normalize: @checked (vec: vector) -> vector,
-    cross: @checked (vec1: vector, vec2: vector) -> vector,
-    dot: @checked (vec1: vector, vec2: vector) -> number,
-    angle: @checked (vec1: vector, vec2: vector, axis: vector?) -> number,
-    floor: @checked (vec: vector) -> vector,
-    ceil: @checked (vec: vector) -> vector,
-    abs: @checked (vec: vector) -> vector,
-    sign: @checked (vec: vector) -> vector,
-    clamp: @checked (vec: vector, min: vector, max: vector) -> vector,
-    max: @checked (vector, ...vector) -> vector,
-    min: @checked (vector, ...vector) -> vector,
-
-    zero: vector,
-    one: vector,
-}
-
-)BUILTIN_SRC";
-
 std::string getBuiltinDefinitionSource()
 {
     std::string result = kBuiltinDefinitionBaseSrc;
@@ -432,20 +401,66 @@ std::string getBuiltinDefinitionSource()
     result += kBuiltinDefinitionDebugSrc;
     result += kBuiltinDefinitionUtf8Src;
     result += kBuiltinDefinitionBufferSrc;
-    if (FFlag::LuauTypeCheckerVectorLerp2)
-    {
-        result += kBuiltinDefinitionVectorSrc;
-    }
-    else
-    {
-        result += kBuiltinDefinitionVectorSrc_DEPRECATED;
-    }
+    result += kBuiltinDefinitionVectorSrc;
 
     return result;
 }
 
 // TODO: split into separate tagged unions when the new solver can appropriately handle that.
 static constexpr const char* kBuiltinDefinitionTypeMethodSrc = R"BUILTIN_SRC(
+
+export type type = {
+    tag: "nil" | "unknown" | "never" | "any" | "boolean" | "number" | "string" | "buffer" | "thread" |
+         "singleton" | "negation" | "union" | "intersection" | "table" | "function" | "extern" | "generic",
+
+    is: (self: type, arg: string) -> boolean,
+
+    -- for singleton type
+    value: (self: type) -> (string | boolean | nil),
+
+    -- for negation type
+    inner: (self: type) -> type,
+
+    -- for union and intersection types
+    components: (self: type) -> {type},
+
+    -- for table type
+    setproperty: (self: type, key: type, value: type?) -> (),
+    setreadproperty: (self: type, key: type, value: type?) -> (),
+    setwriteproperty: (self: type, key: type, value: type?) -> (),
+    readproperty: (self: type, key: type) -> type?,
+    writeproperty: (self: type, key: type) -> type?,
+    properties: (self: type) -> { [type]: { read: type?, write: type? } },
+    setindexer: (self: type, index: type, result: type) -> (),
+    setreadindexer: (self: type, index: type, result: type) -> (),
+    setwriteindexer: (self: type, index: type, result: type) -> (),
+    indexer: (self: type) -> { index: type, readresult: type, writeresult: type }?,
+    readindexer: (self: type) -> { index: type, result: type }?,
+    writeindexer: (self: type) -> { index: type, result: type }?,
+    setmetatable: (self: type, arg: type) -> (),
+    metatable: (self: type) -> type?,
+
+    -- for function type
+    setparameters: (self: type, head: {type}?, tail: type?) -> (),
+    parameters: (self: type) -> { head: {type}?, tail: type? },
+    setreturns: (self: type, head: {type}?, tail: type? ) -> (),
+    returns: (self: type) -> { head: {type}?, tail: type? },
+    setgenerics: (self: type, {type}?) -> (),
+    generics: (self: type) -> {type},
+
+    -- for class type
+    -- 'properties', 'metatable', 'indexer', 'readindexer' and 'writeindexer' are shared with table type
+    readparent: (self: type) -> type?,
+    writeparent: (self: type) -> type?,
+
+    -- for generic type
+    name: (self: type) -> string?,
+    ispack: (self: type) -> boolean,
+}
+
+)BUILTIN_SRC";
+
+static constexpr const char* kBuiltinDefinitionTypeMethodSrc_DEPRECATED = R"BUILTIN_SRC(
 
 export type type = {
     tag: "nil" | "unknown" | "never" | "any" | "boolean" | "number" | "string" | "buffer" | "thread" |
@@ -549,8 +564,12 @@ declare types: {
 
 std::string getTypeFunctionDefinitionSource()
 {
+    std::string result;
 
-    std::string result = kBuiltinDefinitionTypeMethodSrc;
+    if (FFlag::LuauTypeCheckerUdtfRenameClassToExtern)
+        result += kBuiltinDefinitionTypeMethodSrc;
+    else
+        result += kBuiltinDefinitionTypeMethodSrc_DEPRECATED;
 
     if (FFlag::LuauMorePermissiveNewtableType)
         result += kBuiltinDefinitionTypesLibSrc;
